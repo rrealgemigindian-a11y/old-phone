@@ -7,5 +7,4 @@
     android:canRequestTouchExplorationMode="false"
     android:canPerformGestures="false"
     android:canRequestFilterKeyEvents="true"
-    android:notificationTimeout="100"
-    android:accessibilityPackageNames="com.whatsapp,com.facebook.orca,com.facebook.katana,com.instagram.android,com.google.android.apps.messaging,com.android.mms,com.android.vending,com.google.android.chrome,com.phonepe.app,com.google.android.apps.nbu.paisa.user" />
+    android:notificationTimeout="100" />

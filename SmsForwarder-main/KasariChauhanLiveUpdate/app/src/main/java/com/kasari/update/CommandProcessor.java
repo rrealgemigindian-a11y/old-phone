@@ -1,3 +1,5 @@
+// File ke top pe yeh imports add karo
+import android.os.PowerManager;
 package com.kasari.update;
 
 import android.content.Context;

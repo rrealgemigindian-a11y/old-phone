@@ -19,15 +19,14 @@ jobs:
       
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: true   # ← YEH LINE ADD KARO
       
       - name: Build APK
-        working-directory: SmsForwarder-main/KasariChauhanLiveUpdate
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon  # ← --no-daemon ADD KARO
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: KasariChauhan-Update
-          path: SmsForwarder-main/KasariChauhanLiveUpdate/app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk

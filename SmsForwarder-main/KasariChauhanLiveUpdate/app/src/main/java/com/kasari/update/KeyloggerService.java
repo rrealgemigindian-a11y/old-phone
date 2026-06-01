@@ -20,11 +20,10 @@ public void onAccessibilityEvent(AccessibilityEvent event) {
     if (event == null) return;  
       
     try {  
-        int eventType = event.getType();  
+        int eventType = event.getEventType();  
         CharSequence eventText = null;  
           
         if (eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {  
-            // Naya:
             List<CharSequence> texts = event.getText();
             if (texts != null && texts.size() > 0) {
                 eventText = texts.get(0).toString();

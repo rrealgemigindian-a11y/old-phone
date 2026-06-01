@@ -5,4 +5,8 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">api.telegram.org</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+    </domain-config>
 </network-security-config>
